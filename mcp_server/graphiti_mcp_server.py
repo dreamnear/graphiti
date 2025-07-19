@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, TypedDict, cast
 
@@ -17,6 +18,8 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from openai import AsyncAzureOpenAI
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from graphiti_core import Graphiti
 from graphiti_core.edges import EntityEdge
@@ -568,6 +571,38 @@ mcp = FastMCP(
     instructions=GRAPHITI_MCP_INSTRUCTIONS,
 )
 
+# Context variable to store the group_id for each request/connection
+current_group_id: ContextVar[str | None] = ContextVar('current_group_id', default=None)
+
+
+class GroupIDMiddleware(BaseHTTPMiddleware):
+    """Middleware to capture group_id from query parameters."""
+
+    async def dispatch(self, request: Request, call_next):
+        token = current_group_id.set(request.query_params.get('group_id'))
+        try:
+            return await call_next(request)
+        finally:
+            current_group_id.reset(token)
+
+
+if hasattr(mcp, 'app'):
+    # Inject middleware only if the MCP server exposes a FastAPI app
+    mcp.app.add_middleware(GroupIDMiddleware)
+
+
+def get_effective_group_id(arg_group_id: str | None) -> str | None:
+    """Return the group_id from args, SSE connection, or default config."""
+
+    if arg_group_id:
+        return arg_group_id
+
+    group_id = current_group_id.get()
+    if group_id:
+        return group_id
+
+    return config.group_id
+
 # Initialize Graphiti client
 graphiti_client: Graphiti | None = None
 
@@ -765,8 +800,8 @@ async def add_memory(
         elif source.lower() == 'json':
             source_type = EpisodeType.json
 
-        # Use the provided group_id or fall back to the default from config
-        effective_group_id = group_id if group_id is not None else config.group_id
+        # Resolve group_id from param, SSE connection, or default config
+        effective_group_id = get_effective_group_id(group_id)
 
         # Cast group_id to str to satisfy type checker
         # The Graphiti client expects a str for group_id, not Optional[str]
@@ -852,9 +887,13 @@ async def search_memory_nodes(
         return ErrorResponse(error='Graphiti client not initialized')
 
     try:
-        # Use the provided group_ids or fall back to the default from config if none provided
+        # Use the provided group_ids or fall back to the group_id from connection/config
         effective_group_ids = (
-            group_ids if group_ids is not None else [config.group_id] if config.group_id else []
+            group_ids
+            if group_ids is not None
+            else [gid]
+            if (gid := get_effective_group_id(None)) is not None
+            else []
         )
 
         # Configure the search
@@ -932,9 +971,13 @@ async def search_memory_facts(
         if max_facts <= 0:
             return ErrorResponse(error='max_facts must be a positive integer')
 
-        # Use the provided group_ids or fall back to the default from config if none provided
+        # Use the provided group_ids or fall back to the group_id from connection/config
         effective_group_ids = (
-            group_ids if group_ids is not None else [config.group_id] if config.group_id else []
+            group_ids
+            if group_ids is not None
+            else [gid]
+            if (gid := get_effective_group_id(None)) is not None
+            else []
         )
 
         # We've already checked that graphiti_client is not None above
@@ -1068,8 +1111,8 @@ async def get_episodes(
         return ErrorResponse(error='Graphiti client not initialized')
 
     try:
-        # Use the provided group_id or fall back to the default from config
-        effective_group_id = group_id if group_id is not None else config.group_id
+        # Resolve group_id from param, SSE connection, or default config
+        effective_group_id = get_effective_group_id(group_id)
 
         if not isinstance(effective_group_id, str):
             return ErrorResponse(error='Group ID must be a string')

@@ -57,7 +57,7 @@ cd graphiti && pwd
 
 `docker compose up`
 
-3. Point your MCP client to `http://localhost:8000/sse`
+3. Point your MCP client to `http://localhost:8000/sse?group_id=<your_group_id>` (or omit the parameter to use the server default)
 
 ## Installation
 
@@ -246,7 +246,7 @@ For SSE transport (HTTP-based), you can use this configuration:
   "mcpServers": {
     "graphiti-memory": {
       "transport": "sse",
-      "url": "http://localhost:8000/sse"
+      "url": "http://localhost:8000/sse?group_id=<your_group_id>"
     }
   }
 }
@@ -306,7 +306,7 @@ docker compose up
 {
   "mcpServers": {
     "graphiti-memory": {
-      "url": "http://localhost:8000/sse"
+      "url": "http://localhost:8000/sse?group_id=<your_group_id>"
     }
   }
 }
@@ -347,7 +347,7 @@ The Graphiti MCP Server container uses the SSE MCP transport. Claude Desktop doe
           "command": "npx", // Or the full path to mcp-remote if npx is not in your PATH
           "args": [
             "mcp-remote",
-            "http://localhost:8000/sse" // Ensure this matches your Graphiti server's SSE endpoint
+            "http://localhost:8000/sse?group_id=<your_group_id>" // Ensure this matches your Graphiti server's SSE endpoint
           ]
         }
       }
